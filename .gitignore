@@ -1,0 +1,6 @@
+sim
+__pycache__/
+*.pyc
+realtrace/progs
+realtrace/filter
+realtrace/raw_*.txt
