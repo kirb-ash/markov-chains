@@ -1,6 +1,6 @@
 # When Does Markov Prefetching Pay Off? An Entropy-Based Study with an Adaptive Throttle
 
-**Author:** Pala Gaurav Reddy (PES1UG25AM254) · PES University, Bengaluru · UE25CS242A Operating Systems mini project (P11)
+**Authors:** Pala Gaurav Reddy (PES1UG25AM254) and Punith VC (PES1UG25AM295) · PES University, Bengaluru · UE25CS242A Operating Systems mini project (P11)
 
 ## Abstract
 
