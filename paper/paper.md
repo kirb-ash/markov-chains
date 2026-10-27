@@ -18,14 +18,30 @@ We do not claim Markov prefetching itself is new; see Section 2.
 
 ## 2. Background and related work
 
-*TODO (author): this section must come from your own reading. Starting points to verify and cite properly, none of which I have checked page-by-page:*
+**Scope and search method.** This is a targeted, not a systematic, literature review. We started from the two classic works that our method rests on (Joseph and Grunwald; Vitter and Krishnan), followed their citations and later papers that cite them, and searched the web for recent learned or kernel-level prefetching work (queries such as "Markov prefetcher", "learned memory prefetching", "remote memory prefetching Linux", "prefetching survey"). We kept papers that (a) predict future accesses from past ones or (b) prefetch at page/file granularity in an OS. We did not use a fixed database list, date window or screening protocol, so the review may miss relevant work; Table R1 lists what we did verify against a publisher or proceedings page.
 
-- Joseph and Grunwald, "Prefetching using Markov predictors," ISCA 1997: the original Markov prefetcher; our predictor is a simplified, software-level version of the idea.
-- Vitter and Krishnan, "Optimal prefetching via data compression," Journal of the ACM, 1996: relates prefetch performance to the entropy of the access sequence. This is the theory behind our entropy analysis, so our result is an empirical illustration of a known relationship, not a new theorem.
-- Chen and Baer, hardware stride prefetching (IEEE Trans. Computers, 1995), and Nesbit and Smith, global history buffer prefetching (HPCA 2004).
-- The course reference list for P11: Liu et al., OSDI 2025 (tiered memory), Sun et al., ASPLOS 2025 (M5), Chai et al., OSDI 2025 (EMT), He et al., SOSP 2025. These concern page placement and migration in tiered/CXL memory and give context for why workload-aware memory policies matter; they are not prefetching-accuracy studies.
+**Markov and compression-based prediction.** Joseph and Grunwald [1] proposed a hardware Markov prefetcher that learns miss-address transitions and issues several predicted addresses at once; the table-based predictor in this paper is a simplified, page-level, software version of that idea. Vitter and Krishnan [2] showed that a prefetcher built on a compression-style predictor of the access sequence is asymptotically optimal and that its fault rate is tied to the entropy of the source, which is the theory behind our entropy analysis (Section 4.5). Kroeger and Long [3] applied a multi-order PPM context model to file accesses and reported that a 4 MB predictive cache beat a 90 MB LRU cache in their simulations; this is the closest OS-level precedent for our order-k predictors.
 
-Write a literature matrix (paper, problem, method, metric, gap) and a short paragraph per cluster.
+**Simple and history-based prefetchers.** Chen and Baer [4] introduced reference-prediction-table stride prefetching, the model for our stride baseline. Nesbit and Smith [5] stored miss history in a global history buffer so that different correlation patterns (stride, delta, address) can be served from one structure.
+
+**Learned and OS-level prefetching.** Hashemi et al. [6] connected prefetching to n-gram language models and replaced the table with an LSTM, reporting higher precision and recall than table-based prefetchers on their benchmarks. Leap [7] is an OS-level example: a majority-trend detector over recent page deltas, integrated into the Linux data path for remote memory, with large latency gains reported against the default path. FarSight [8] uses a small offline-trained neural model inside the Linux far-memory path and reports gains over FastSwap and Hermit. A recent survey of complex memory-access prediction [9] covers hardware, software and ML prefetchers and lists missing standard benchmarks, energy trade-offs and the lack of a theory of prefetchability as open challenges.
+
+**Table R1.** Comparison of the closest work. "Not reported" means we did not find or did not read the item in the source; results across papers use different setups and are not comparable.
+
+| Work | Level / granularity | Predictor | Evaluation (as described by authors) | Limitation relevant to us |
+|---|---|---|---|---|
+| Joseph & Grunwald 1997 [1] | Hardware, cache lines | Markov table, multiple predictions | Cycle-level simulation, commercial benchmarks | Hardware cache setting; no entropy analysis |
+| Vitter & Krishnan 1996 [2] | Theory, pages/blocks | Compression-based (LZ) | Proofs; asymptotic optimality | Asymptotic; not an empirical OS study |
+| Kroeger & Long 1996 [3] | File system | Multi-order PPM context | Trace simulation, cache hit rate | File events, not pages; no throttle |
+| Chen & Baer 1995 [4] | Hardware, data cache | Reference prediction table (stride) | Simulation | Strides only |
+| Nesbit & Smith 2004 [5] | Hardware, data cache | Global history buffer | Simulation | Hardware setting |
+| Hashemi et al. 2018 [6] | Hardware, cache lines | LSTM | Benchmarks, precision/recall | Offline-trained; cost not OS-realistic |
+| Leap 2020 [7] | OS, remote-memory pages | Majority delta trend | Real Linux system, RDMA | Targets remote memory; trend-based, not learned Markov |
+| FarSight 2025 [8] | OS, far-memory pages | Small neural net + future maps | Real Linux, 4 workloads | Offline training; heavy machinery |
+| Survey [9] | Hardware/software/ML | Survey | PRISMA-guided (per its text) | Cache-centric; not page-level OS |
+| **This paper** | OS, pages (simulated) | Count-based Markov, page vs delta state, k=1..3 | Simulator; 8 synthetic + 2 real traces | No timing model; 2 real programs |
+
+**Research gap (provisional).** From the works above we see three gaps that our project can address at small scale; each is provisional because our search was not systematic and recent work may already cover it. (G1) The entropy-benefit relationship is established theoretically [2], but we found no empirical study that plots the benefit of an order-k, page-versus-delta Markov predictor against measured trace entropy across workloads. (G2) Delta-versus-page state and its table-size cost are rarely contrasted for page-level prefetching. (G3) Prefetch harm on high-entropy traces and a cheap accuracy throttle to contain it are discussed less than prefetch gains. Our experiments address G1 to G3 in simulation only; they do not establish that the findings hold on real systems.
 
 ## 3. Method
 
@@ -138,6 +154,36 @@ Across all 20 traces the rank correlation between entropy and fault reduction is
 ## 6. Conclusion
 
 A Markov prefetcher is worth deploying when the reference stream has low conditional entropy, and the choice of state (page versus delta) and order matters as much as the algorithm. When entropy is high, simple prefetching hurts and Markov prefetching adds nothing, so an accuracy-based throttle is the safe default. On the two real traces we tested, the simplest heuristic (next-page) was as good as or better than the Markov predictor where any prefetching helped, so the practical case for the added complexity is, on this evidence, not established.
+
+## 7. Future work
+
+1. Add a timing model (fault latency, I/O bandwidth, prefetch timeliness) so that fault counts become time.
+2. Run kernel-level experiments (for example, a Linux swap or userfaultfd-based prefetcher) and compare against Leap-style trend prefetching [7].
+3. Add many more real traces (SPEC or GAP-style programs) and test the entropy-benefit relationship on held-out workloads.
+4. Tune the throttle on held-out traces and compare with a learned predictor [6, 8].
+5. Systematic literature search with a stated protocol (databases, dates, inclusion criteria) to confirm or reject gaps G1 to G3.
+
+## References
+
+[1] D. Joseph and D. Grunwald, "Prefetching using Markov predictors," in *Proc. 24th Int. Symp. Computer Architecture (ISCA)*, 1997. (Title, authors, venue verified on a bibliographic record; pages not verified.)
+
+[2] J. S. Vitter and P. Krishnan, "Optimal prefetching via data compression," *Journal of the ACM*, vol. 43, no. 5, pp. 771-793, 1996. (Verified on dblp; DOI not checked.)
+
+[3] T. M. Kroeger and D. D. E. Long, "Predicting future file-system actions from prior events," in *Proc. USENIX Annual Technical Conference*, San Diego, 1996. (Verified on usenix.org.)
+
+[4] T.-F. Chen and J.-L. Baer, "Effective hardware-based data prefetching for high-performance processors," *IEEE Trans. Computers*, vol. 44, no. 5, pp. 609-623, 1995, doi:10.1109/12.381947. (Journal details verified on an index record; author names from our own knowledge, not on that record.)
+
+[5] K. J. Nesbit and J. E. Smith, "Data cache prefetching using a global history buffer," in *Proc. 10th Int. Symp. High-Performance Computer Architecture (HPCA)*, 2004, pp. 96-105, doi:10.1109/HPCA.2004.10030.
+
+[6] M. Hashemi, K. Swersky, J. A. Smith, G. Ayers, H. Litz, J. Chang, C. Kozyrakis and P. Ranganathan, "Learning memory access patterns," in *Proc. 35th Int. Conf. Machine Learning (ICML)*, PMLR vol. 80, pp. 1919-1928, 2018.
+
+[7] H. Al Maruf and M. Chowdhury, "Effectively prefetching remote memory with Leap," in *Proc. USENIX Annual Technical Conference (ATC)*, 2020, pp. 843-857. (Verified on usenix.org.)
+
+[8] Y. Huang, Z. Guo and Y. Zhang, "Deep-learning-driven prefetching for far memory," arXiv:2506.00384, 2025. (Preprint; peer-review status not verified.)
+
+[9] "Toward intelligent prefetching: a survey on complex memory access prediction techniques," arXiv:2606.09955. (Preprint; author list and date not verified, cite after checking.)
+
+*Not yet verified (from the course P11 list, add after reading):* Liu et al., OSDI 2025 (tiered memory); Sun et al., ASPLOS 2025 (M5); Chai et al., OSDI 2025 (EMT); He et al., SOSP 2025.
 
 ## Reproducibility
 
