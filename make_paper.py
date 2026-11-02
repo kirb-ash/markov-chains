@@ -11,10 +11,10 @@ t1 = "| workload | " + " | ".join(n for _, n in C1) + " |\n|---|" + "---|" * len
 for w in WL:
     vals = [g(w, c) for c, _ in C1]; lo = min(vals)
     t1 += f"| {w} | " + " | ".join((f"**{v:.3f}**" if abs(v - lo) < 1e-9 else f"{v:.3f}") for v in vals) + " |\n"
-t2 = "| workload | aggressive: wasted/ref | adaptive: wasted/ref | aggressive: fault rate | adaptive: fault rate |\n|---|---|---|---|---|\n"
+t2 = "| workload | aggressive: wasted/ref | adaptive: wasted/ref | aggressive: fault rate | adaptive: fault rate |\n|---|----|-----|------------------|------------------|\n"
 for w in WL:
     t2 += f"| {w} | {g(w,'mk-page-k1-d2','wasted'):.3f} | {g(w,'mk-page-k1-ad','wasted'):.3f} | {g(w,'mk-page-k1-d2'):.3f} | {g(w,'mk-page-k1-ad'):.3f} |\n"
-t3 = "| workload | best model entropy (bits/ref) | best Markov config | fault rate: none | fault rate: best Markov | reduction |\n|---|---|---|---|---|---|\n"
+t3 = "| workload | best model entropy (bits/ref) | best Markov config | fault rate: none | fault rate: best Markov | reduction |\n|---|---|----|-----|------------------|------------------|\n"
 for _, r in e[e.workload.isin(WL)].iterrows():
     t3 += f"| {r.workload} | {r.H_min:.3f} | {r.best_cfg} | {r.fr_none:.3f} | {r.fr_best:.3f} | {r.reduction:.3f} |\n"
 sd = s[s.config == "none"].groupby(s.workload.str.split("_").str[0]).fr.agg(["mean", "std"])
@@ -31,7 +31,34 @@ N = dict(T1=t1, T2=t2, T3=t3, RHO=f"{rk:.2f}", RHO10=f"{rk10:.2f}", NTR=str(len(
          RBN=f"{g('real_bfs','none'):.3f}", RBX=f"{g('real_bfs','next'):.3f}", RBM=f"{g('real_bfs','mk-delta-k2'):.3f}",
          RBAD=f"{g('real_bfs','mk-delta-k2-ad'):.3f}", RBAG=f"{g('real_bfs','mk-delta-k2-d2'):.3f}",
          NZS=f"{sd.loc['noisy','std']:.4f}", ZZS=f"{sd.loc['zipf','std']:.4f}")
+
+# ---- literature review pieces (review/refs.py)
+import re, sys
+sys.path.insert(0, "review")
+import refs as _refs
+ALL = _refs.CLASSIC + _refs.R
+NUM = {r["k"]: i + 1 for i, r in enumerate(ALL)}
+def _cite(m):
+    keys = [k.strip().lstrip("@") for k in m.group(1).split(";")]
+    return "[" + ", ".join(str(NUM[k]) for k in keys) + "]"
+def fmt_ref(i, r):
+    note = "" if r["s"] == "V" else " (partially verified: title and venue only)"
+    return f"[{i}] {r['a']}, \"{r['t']},\" {r['v']}, {r['y']}.{note}"
+REFS = "\n\n".join(fmt_ref(i + 1, r) for i, r in enumerate(ALL))
+rows = "| Ref | Year | Platform | Result as stated by authors | Disadvantage as stated by authors |\n|---|----|-----|------------------|------------------|\n"
+for r in _refs.R:
+    flag = "" if r["s"] == "V" else " (P)"
+    rows += f"| [{NUM[r['k']]}]{flag} | {r['y']} | {_refs.PLATNAME[r['plat']]} | {r['res']} | {r['dis']} |\n"
+from collections import Counter
+yc = Counter(r["y"] for r in _refs.R)
+hw = [r for r in _refs.R if r["cat"] == "HW"]
+EXTRA = dict(REFS=REFS, LITTABLE=rows, NREV=str(len(_refs.R)), N24=str(yc[2024]), N25=str(yc[2025]), N26=str(yc[2026]),
+             NVER=str(sum(r["s"] == "V" for r in _refs.R)), NPART=str(sum(r["s"] != "V" for r in _refs.R)),
+             NHW=str(len(hw)), NHWSIM=str(sum(r["plat"] in ("SIM", "TRACE", "MIX") for r in hw)))
+
 txt = open("paper/template.md").read()
+txt = re.sub(r"\[(@[A-Za-z0-9_]+(?:;\s*@[A-Za-z0-9_]+)*)\]", _cite, txt)
+N.update(EXTRA)
 for k, v in N.items(): txt = txt.replace("{{" + k + "}}", v)
 assert "{{" not in txt, [l for l in txt.splitlines() if "{{" in l]
 open("paper/paper.md", "w").write(txt); print("paper/paper.md written")
